@@ -1,0 +1,336 @@
+---
+
+---
+
+<div>
+    <div class="div-random">
+        <a id="new" class="btn btn-green">Generate New Exercise</a>
+    </div>
+    <div id="functionDisplay"> </div>
+    <div class="div-random">
+        <a id="sln" style="display: none" class="btn btn-green">Compute Solution</a>
+    </div>
+    <div id="answerDisplay"> </div>
+</div>
+
+<script>
+    
+    import { templateLiteral } from 'astro:schema';
+    import katex from 'katex';
+    import { sqrt, evaluate, fraction, re, im, complex, den, num, sign, derivative, factorial, parse, bignumber, divide, multiply, subtract, floor, max } from 'mathjs';
+    import { create, all } from 'mathjs';
+
+    document.getElementById("new")?.addEventListener('click', generateNewFunction);
+        
+    const slnButton = document.getElementById("sln")!;
+    slnButton.addEventListener('click', computeAnswer);
+
+    var f = '';
+    var poles = [[0],[[1,1]],[[3,3]]];
+
+    function generateNewFunction(){
+        // going for 2-1-1 average approx.
+        var num_linear = floor(random_gaussian(1,8,2));
+        var num_quadratic = floor(random_gaussian(0,5,2));
+        var num_repeated = floor(random_gaussian(0,5,2)); 
+
+        var linear_arr : number[] = [];
+        var quadratic_arr : number[][] = [];
+        var repeated_arr : number[][] = [];
+
+        //linear poles
+        for (let i = 0; i < num_linear; i++) {
+            while (true) {
+                var linear_pole = random_linear(-5, 5);
+                if (!linear_arr.includes(linear_pole)){
+                    linear_arr.push(linear_pole);
+                    break;
+                }
+            }
+        }
+
+        for (let i = 0; i < num_quadratic; i++) {
+            while (true) {
+                var quadratic_pole = [random_linear(-3, 3), random_linear(1, 3)];
+                if (!quadratic_arr.includes(quadratic_pole)){
+                    quadratic_arr.push(quadratic_pole);
+                    break;
+                }
+            }
+        }
+
+        for (let i = 0; i < num_repeated; i++) {
+            while (true) {
+                var repeated_pole = [random_linear(-3, 3), floor(random_gaussian(2,7,2))];
+                if (!repeated_arr.map(arr => arr[0]).includes(repeated_pole[0]) && !linear_arr.includes(repeated_pole[0])){
+                    repeated_arr.push(repeated_pole);
+                    break;
+                }
+            }
+        }
+
+        const slnEstimate = document.getElementById("sln")!;
+
+        var maxRepeatedDegree = 0;
+        if (num_repeated != 0) {
+            maxRepeatedDegree = max(repeated_arr.map(arr => arr[1]));
+        }
+
+        // time estimates
+        if (maxRepeatedDegree >= 4 && num_repeated >= 2 && num_quadratic != 0) {
+            slnEstimate.textContent = 'Compute Solution (Estimate: click at your own risk :P)';
+        }
+        else if ((maxRepeatedDegree >= 4 || (num_repeated >= 2 && maxRepeatedDegree >= 3)) && num_quadratic != 0) {
+            slnEstimate.textContent = 'Compute Solution (Estimate: up to a minute)';
+        }
+        else if (maxRepeatedDegree >= 3 && num_quadratic != 0) { 
+            slnEstimate.textContent = 'Compute Solution (Estimate: a few seconds)';
+        }
+        else {
+            slnEstimate.textContent = 'Compute Solution (Estimate: instant)';
+        }
+        
+
+        poles = [linear_arr, quadratic_arr, repeated_arr];
+        
+        var f_num = 1;
+        var f_den = '';
+
+        linear_arr.forEach((pole) => {
+            if (pole == 0) {
+                f_den += '(s)';
+            }
+            else if (pole > 0) {
+                f_den += `(s-${pole})`;
+            }
+            else {
+                f_den += `(s+${pole*-1})`;
+            }
+        })
+
+        quadratic_arr.forEach(([lambda, mu]) => {
+            if (lambda == 0) {
+                f_den += `(s^2+${mu}^2)`;
+            }
+            else if (lambda > 0) {
+                f_den += `((s-${lambda})^2+${mu}^2)`;
+            }
+            else {
+                f_den += `((s+${lambda*-1})^2+${mu}^2)`;
+            }
+        })
+
+        repeated_arr.forEach(([pole, degree]) => {
+            if (pole == 0) {
+                f_den += `(s)^${degree}`;
+            }
+            else if (pole > 0) {
+                f_den += `(s-${pole})^${degree}`;
+            }
+            else {
+                f_den += `(s+${pole*-1})^${degree}`;
+            }
+        })
+
+        f = `[${f_num}]/[${f_den}]`;
+
+        // custom values for testing go here (uncommented of course)
+        // f = '[1]/[(s-5)(s-4)((s-1)^2+4^2)(s-1)^2]';
+        // poles = [[5,4],[[1,4]],[[1,2]]];
+
+        // console.log(f);
+
+        katex.render('F(s)=' + f.replace('[', '\\frac{').replace(']/[', '}{').replace(']', '}'), document.getElementById('functionDisplay')!, {
+            throwOnError: false,
+            displayMode: true,
+        });
+
+        slnButton.style.display = "block";
+    }
+
+
+    function computeAnswer(){
+        var ans = '';
+        var termCount = 0;
+
+        //linear poles
+        poles[0].forEach((pole) => {           
+            var covered = coverUpLinear(pole);
+            
+            var result = fraction(evaluate(covered[0], {s: pole}));
+
+            var sgnEval = (Number(sign(result)) == -1) ? '-' : '';
+
+            var coef = '';
+
+            if (den(result) != 1n) {
+                coef = `${sgnEval}\\frac{${Math.abs(Number(num(result)))}}{${den(result)}}`;
+            } 
+            else {
+                coef = `${num(result)}`
+            }
+
+            ans += `+\\frac{${coef}}{${covered[1]}}`;
+
+            termCount++;
+            if (termCount % 3 == 0) {
+                ans += '\\\\& ';
+            }
+        })
+
+        //complex poles
+        poles[1].forEach(([lambda, mu]) => {           
+            var covered = coverUpQuadratic(lambda, mu);
+            
+            var result = evaluate(covered[0], {s: complex(lambda, mu)});
+
+            const clean = (x: number) => Number(x.toPrecision(14));
+
+            var resultRe = fraction(clean(re(result)));
+            var resultIm = fraction(clean(im(result)));
+
+            var A = divide(resultIm, fraction(mu)); 
+            var B = subtract(resultRe, multiply(fraction(lambda), A));
+
+            var sgnEvalA = (Number(sign(A)) == -1) ? '-' : '';
+            var sgnEvalB = (Number(sign(B)) == -1) ? '-' : '';
+            var coefA = '';
+            var coefB = '';
+
+            if (den(A) != 1n) {
+                coefA = `${sgnEvalA}\\frac{${Math.abs(Number(num(A)))}}{${den(A)}}`;
+            } 
+            else {
+                coefA = `${num(A)}`
+            }
+
+            if (den(B) != 1n) {
+                coefB = `${sgnEvalB}\\frac{${Math.abs(Number(num(B)))}}{${den(B)}}`;
+            } 
+            else {
+                coefB = `${num(B)}`
+            }
+            
+            ans += `+\\frac{${coefA}s+${coefB}}{${covered[1]}}`;
+
+            termCount++;
+            if (termCount % 3 == 0) {
+                ans += '\\\\& ';
+            }
+        })
+
+        //repeated poles
+
+        poles[2].forEach(([pole, degree]) => {           
+            var covered = coverUpRepeated(pole, degree);
+            var tempFunction = parse(covered[0].toString().replace(/\[/g, '(').replace(/\]/g, ')'));
+
+            for (let i = degree; i > 0; i--) {
+                //account for factorial scalar
+                var result = fraction(evaluate(`(${tempFunction})/(${factorial(degree - i)})`, {s: pole}));
+
+                var sgnEval = (Number(sign(result)) == -1) ? '-' : '';
+
+                var coef = '';
+
+                if (den(result) != 1n) {
+                    coef = `${sgnEval}\\frac{${Math.abs(Number(num(result)))}}{${den(result)}}`;
+                } 
+                else {
+                    coef = `${num(result)}`
+                }
+                
+                ans += `+\\frac{${coef}}{${covered[1]}^{${i}}}`;
+
+                termCount++;
+                if (termCount % 3 == 0) {
+                    ans += '\\\\& ';
+                }
+                
+                if (i != 1) {
+                    tempFunction = derivative(tempFunction, 's');
+                }        
+            }
+        })
+
+        //finished computing, rendering time
+        katex.render('\\begin{align*}F(s)&=' + ans.substring(1, ans.length) + '\\end{align*}', document.getElementById('answerDisplay')!, {
+            throwOnError: false,
+            displayMode: true,
+        });
+    }
+
+    // returns: Array. [0] contains covered up f, [1] contains the covered material.
+    function coverUpLinear(pole: number){
+        if (pole == 0) {
+            return [f.replace('(s)', ''), 's'];
+        }
+        else if (pole > 0) {
+            return [f.replace(`(s-${pole})`, ''), `s-${pole}`];
+        }
+        else {
+            return [f.replace(`(s+${pole * -1})`, ''), `s+${pole * -1}`];
+        }
+    }
+    function coverUpQuadratic(lambda: number, mu: number){
+        if (mu == 0) {
+            throw new Error('mu cannot be 0, silly!');
+        }
+        else if (lambda == 0) {
+            return [f.replace(`(s^2+${mu}^2)`, ''), `s^2+${mu}^2`];
+        }
+        else if (lambda > 0) {
+            return [f.replace(`((s-${lambda})^2+${mu}^2)`, ''), `(s-${lambda})^2+${mu}^2`];
+        }
+        else {
+            return [f.replace(`((s+${lambda*-1})^2+${mu}^2)`, ''), `(s+${lambda*-1})^2+${mu}^2`];
+        }
+    }
+    function coverUpRepeated(pole: number, degree: number) {
+        if (pole == 0) {
+                let re = new RegExp(String.raw`([^\(])\(s\)\^${degree}`);
+                return [f.replace(re, `$1`), 's'];
+            }
+            else if (pole > 0) {
+                let re = new RegExp(String.raw`([^\(])\(s\-${pole}\)\^${degree}`)
+                return [f.replace(re, `$1`), `(s-${pole})`];
+            }
+            else {
+                let re = new RegExp(String.raw`([^\(])\(s\+${pole * -1}\)\^${degree}`)
+                return [f.replace(re, `$1`), `(s+${pole * -1})`];
+            }
+    }
+
+    //source: https://stackoverflow.com/a/49434653
+
+    function random_gaussian(min: number, max: number, skew: number = 1) {
+        let u = 0, v = 0;
+        while(u === 0) u = Math.random() //Converting [0,1) to (0,1)
+        while(v === 0) v = Math.random()
+        let num = Math.sqrt( -2.0 * Math.log( u ) ) * Math.cos( 2.0 * Math.PI * v )
+        
+        num = num / 10.0 + 0.5 // Translate to 0 -> 1
+        if (num > 1 || num < 0) 
+            num = random_gaussian(min, max, skew) // resample between 0 and 1 if out of range
+        
+        else{
+            num = Math.pow(num, skew) // Skew
+            num *= max - min // Stretch to fill range
+            num += min // offset to min
+        }
+        return num
+    }
+
+    function random_linear(min: number, max: number) {
+        return floor(min + Math.random() * (max + 1 - min));
+    }
+</script>
+
+<style>
+    .div-random{
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        margin: 10px 0 10px 0;
+    }
+</style>
